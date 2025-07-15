@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-04-22 13:35:25.143107",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "context_used",
+  "column_break_dfna",
+  "timestamp",
+  "section_break_ltky",
+  "query",
+  "response"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "label": "User",
+   "options": "User"
+  },
+  {
+   "default": "0",
+   "fieldname": "context_used",
+   "fieldtype": "Check",
+   "label": "Context Used"
+  },
+  {
+   "fieldname": "column_break_dfna",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "timestamp",
+   "fieldtype": "Datetime",
+   "label": "Timestamp"
+  },
+  {
+   "fieldname": "section_break_ltky",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "query",
+   "fieldtype": "Long Text",
+   "label": "Query"
+  },
+  {
+   "fieldname": "response",
+   "fieldtype": "Long Text",
+   "label": "Response"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-04-22 13:36:48.680229",
+ "modified_by": "Administrator",
+ "module": "GS Chat",
+ "name": "Chatbot Interaction",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
