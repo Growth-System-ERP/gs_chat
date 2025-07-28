@@ -16,8 +16,23 @@ prompt = PromptTemplate(
     template=template.strip()
 )
 
-api_key = frappe.get_doc("Chatbot Settings").get("api_key")
-llm = ChatOpenAI(temperature=0, openai_api_key=api_key)
+# Get settings for API configuration
+settings = frappe.get_doc("Chatbot Settings")
+api_key = settings.get("api_key")
+provider = settings.get("provider") or "OpenAI"
+base_url = settings.get("base_url") if provider == "DeepSeek" else None
+
+# Create LLM instance with provider-specific configuration
+llm_kwargs = {
+    "temperature": 0,
+    "openai_api_key": api_key
+}
+
+# Add base_url for DeepSeek
+if provider == "DeepSeek" and base_url:
+    llm_kwargs["base_url"] = base_url
+
+llm = ChatOpenAI(**llm_kwargs)
 chain = LLMChain(llm=llm, prompt=prompt)
 
 @frappe.whitelist()
