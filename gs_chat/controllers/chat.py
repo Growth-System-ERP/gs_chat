@@ -1002,7 +1002,7 @@ If asked about topics outside your scope, respond professionally: "I'm specializ
       "doctype": "Primary DocType being queried"
     }}
   ],
-  "template": "Your response template with {{{{placeholder}}}} variables and helpful context"
+  "template": "Your response template with {{placeholder}} variables and helpful context"
 }}
 ```
 
@@ -1017,19 +1017,19 @@ If asked about topics outside your scope, respond professionally: "I'm specializ
 🔧 TEMPLATE GUIDELINES:
 
 📝 Simple Placeholders:
-- Single values: "The customer {{{{customer_info.customer_name}}}} has..."
-- Calculations: "Total revenue is {{{{revenue_data.total_amount}}}}"
-- Dates: "Last transaction was on {{{{last_transaction.posting_date}}}}"
+- Single values: "The customer {{customer_info.customer_name}} has..."
+- Calculations: "Total revenue is {{revenue_data.total_amount}}"
+- Dates: "Last transaction was on {{last_transaction.posting_date}}"
 
 📋 List Formatting:
 - Use this exact syntax for lists:
-"Top selling items: {{% for item in top_items %}}- {{{{item.item_name}}}}: {{{{item.total_qty}}}} units sold{{% endfor %}}"
+"Top selling items: {{% for item in top_items %}}- {{item.item_name}}: {{item.total_qty}} units sold{{% endfor %}}"
 
 - For numbered lists:
-"Sales summary: {{% for sale in sales_data %}}{{{{loop.index}}}}. {{{{sale.customer_name}}}}: ${{{{sale.amount}}}}{{% endfor %}}"
+"Sales summary: {{% for sale in sales_data %}}{{loop.index}}. {{sale.customer_name}}: {{ sale.currency }} {{sale.amount}}{{% endfor %}}"
 
 - For detailed lists with multiple fields:
-"Customer details: {{% for customer in customer_list %}}• {{{{customer.customer_name}}}} ({{{{customer.territory}}}}) - Revenue: ${{{{customer.total_revenue}}}}{{% endfor %}}"
+"Customer details: {{% for customer in customer_list %}}• {{customer.customer_name}} {{customer.territory}} - Revenue: {{currency}} {{customer.total_revenue}} {{% endfor %}}"
 
 💡 RESPONSE QUALITY TIPS:
 - Always provide context and explanation with data
@@ -1041,14 +1041,14 @@ If asked about topics outside your scope, respond professionally: "I'm specializ
 
 ⚠️ CRITICAL REQUIREMENTS:
 - YOUR RESPONSE MUST BE A VALID JSON OBJECT
-- Use double curly braces for template variables: {{{{variable}}}}
+- Use double curly braces for template variables: {{variable}}
 - Test your JSON syntax before responding
 - Include helpful business context, not just raw data
 - Always maintain the Growth ERP branding in responses
 
 🎯 EXAMPLES OF GOOD RESPONSES:
 
-For data queries: "Based on your Growth ERP data, here are your top performing products: {{% for item in top_items %}}{{{{item.item_name}}}} generated ${{{{item.revenue}}}} in sales{{% endfor %}}. Consider focusing marketing efforts on these high-performers."
+For data queries: "Based on your Growth ERP data, here are your top performing products: {{% for item in top_items %}}{{item.item_name}} generated {{currency}} {{item.revenue}} in sales{{% endfor %}}. Consider focusing marketing efforts on these high-performers."
 
 For guidance: "To set up a new customer in Growth ERP, navigate to the CRM module and click 'New Customer'. Fill in the required details including customer name, contact information, and territory. This will enable you to create sales transactions and track customer interactions effectively."
 
@@ -1188,9 +1188,11 @@ def process_message(query, references=None, conversation_id=None):
             rag_context = "\n\n📚 RELEVANT KNOWLEDGE BASE:\n"
             for i, doc in enumerate(relevant_docs, 1):
                 rag_context += f"\n{i}. Source: {doc['source']}\n"
-                rag_context += f"Content: {doc['content'][:500]}...\n"
+                escaped_content = doc['content'][:500].replace('{', '{{').replace('}', '}}')
+                rag_context += f"Content: {escaped_content}...\n"
             complete_system_prompt += rag_context
 
+        # frappe.log_error("rag context", complete_system_prompt)
         # Schema information is now included in RAG context above
 
         prompt = ChatPromptTemplate.from_messages([
@@ -1382,6 +1384,7 @@ def render_template(template, query_results):
             result = result.replace(loop_str, "".join(rendered_items))
 
     return result
+
 def get_or_create_memory(conversation_id, api_key, provider="OpenAI", base_url=None):
     if conversation_id not in conversation_memories:
         # Create LLM instance for memory using configuration factory
