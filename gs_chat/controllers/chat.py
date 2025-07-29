@@ -987,6 +987,7 @@ If asked about topics outside your scope, respond professionally: "I'm specializ
 - Purchase Invoice: name, supplier, posting_date, base_grand_total, docstatus
 - Sales Order: name, customer, transaction_date, base_grand_total, docstatus
 - Stock Entry: name, stock_entry_type, posting_date, docstatus
+- Job Card: name, work_order, posting_date, status, docstatus
 
 🎯 RESPONSE FORMAT - YOU MUST CHOOSE ONE OF THESE TWO FORMATS:
 
@@ -1001,7 +1002,7 @@ If asked about topics outside your scope, respond professionally: "I'm specializ
       "doctype": "Primary DocType being queried"
     }}
   ],
-  "template": "Your response template with {{placeholder}} variables and helpful context"
+  "template": "Your response template with {{{{placeholder}}}} variables and helpful context"
 }}
 ```
 
@@ -1016,9 +1017,9 @@ If asked about topics outside your scope, respond professionally: "I'm specializ
 🔧 TEMPLATE GUIDELINES:
 
 📝 Simple Placeholders:
-- Single values: "The customer {{customer_info.customer_name}} has..."
-- Calculations: "Total revenue is {{revenue_data.total_amount}}"
-- Dates: "Last transaction was on {{last_transaction.posting_date}}"
+- Single values: "The customer {{{{customer_info.customer_name}}}} has..."
+- Calculations: "Total revenue is {{{{revenue_data.total_amount}}}}"
+- Dates: "Last transaction was on {{{{last_transaction.posting_date}}}}"
 
 📋 List Formatting:
 - Use this exact syntax for lists:
@@ -1091,12 +1092,12 @@ Remember: You are not just providing data - you are a business advisor helping u
 def process_message(query, references=None, conversation_id=None):
     """
     Process a message using a simple Langchain API call
-    
+
     Args:
         query: User's query text
         references: Optional JSON string or list of document references
         conversation_id: Optional ID of an existing conversation
-        
+
     Returns:
         Dict with response from LLM and success status
     """
@@ -1144,14 +1145,14 @@ def process_message(query, references=None, conversation_id=None):
                 "title": query[:30] + ("..." if len(query) > 30 else ""),
                 "status": "Active"
             })
-            
+
             conversation.insert(ignore_permissions=True)
             conversation_id = conversation.name
         else:
             conversation = frappe.get_doc("Chatbot Conversation", conversation_id)
             if conversation.user != user:
                 frappe.throw(_("You don't have permission to access this conversation"))
-        
+
         # Save user message
         user_message = frappe.get_doc({
             "doctype": "Chatbot Message",
@@ -1161,10 +1162,10 @@ def process_message(query, references=None, conversation_id=None):
             "is_error": 0
         })
         user_message.insert(ignore_permissions=True)
-        
+
         # Get or create memory for this conversation
         memory = get_or_create_memory(conversation_id, api_key, provider, base_url)
-        
+
         # RAG: Retrieve relevant documents (replaces SchemaLayer)
         relevant_docs = []
         try:
@@ -1197,7 +1198,7 @@ def process_message(query, references=None, conversation_id=None):
             MessagesPlaceholder(variable_name="history"),
             HumanMessagePromptTemplate.from_template("Generate a response for: {input}")
         ])
-        
+
         # Create the chain with memory
         chain = ConversationChain(
             llm=llm,
@@ -1205,7 +1206,7 @@ def process_message(query, references=None, conversation_id=None):
             memory=memory,
             verbose=True
         )
-        
+
         # Generate response with timing
         start_time = time.time()
         response = chain.predict(input=query)
@@ -1214,11 +1215,11 @@ def process_message(query, references=None, conversation_id=None):
         # Log response details for debugging
         frappe.logger().info(f"AI Response - Provider: {provider}, Model: {model_name}, Time: {response_time:.2f}s")
         frappe.logger().debug(f"AI Response Content: {repr(response)}")
-        
+
         try:
             # Look for JSON block in backticks or plain JSON
             json_match = re.search(r'```(?:json)?\s*(.*?)\s*```|^\s*(\{.*\})\s*$', response, re.DOTALL)
-            
+
             if json_match:
                 if json_match.group(1):
                     json_str = json_match.group(1)
@@ -1231,28 +1232,28 @@ def process_message(query, references=None, conversation_id=None):
                     json_str = json_match.group(0)
                 else:
                     json_str = "{}"
-            
+
             # Parse the JSON
             analysis_data = json.loads(json_str)
-            
+
             # Check if this needs database access
             needs_data = analysis_data.get("needs_data", False)
-            
+
             if needs_data:
                 # Extract queries and template
                 queries = analysis_data.get("queries", [])
                 template = analysis_data.get("template", "")
-                
+
                 # Log for debugging
                 frappe.logger().debug(f"Executing queries: {json.dumps(queries)}")
-                
+
                 # Execute queries
                 query_results = {}
-                
+
                 for query_obj in queries:
                     key = query_obj.get("key")
                     sql = query_obj.get("query")
-                    
+
                     # Skip invalid queries
                     if not key or not sql:
                         continue
@@ -1260,13 +1261,13 @@ def process_message(query, references=None, conversation_id=None):
                     # Execute SQL query
                     result = frappe.db.sql(sql, as_dict=1)
                     query_results[key] = result
-                
+
                 # Render template with query results
                 response = render_template(template, query_results)
             else:
                 # No database access needed, use the direct response
                 response = analysis_data.get("response", "I understand your question, but I don't have a specific answer for that.")
-            
+
         except Exception as e:
             frappe.log_error(f"Error processing analysis result: {str(e)}\nResult: {response}")
             # Fallback to sending the raw analysis result
@@ -1282,7 +1283,7 @@ def process_message(query, references=None, conversation_id=None):
             "is_error": 0
         })
         bot_message.insert(ignore_permissions=True)
-        
+
         return {
             "success": True,
             "response": response,
@@ -1293,7 +1294,7 @@ def process_message(query, references=None, conversation_id=None):
             "rag_sources": len(relevant_docs),
             "rag_used": len(relevant_docs) > 0
         }
-    
+
     except Exception as e:
         frappe.log_error(f"Chatbot Error: {str(e)}")
         return {
@@ -1304,20 +1305,20 @@ def process_message(query, references=None, conversation_id=None):
 def render_template(template, query_results):
     """
     Render a template with query results
-    
+
     Args:
         template: Template string with placeholders
         query_results: Dictionary of query results
-        
+
     Returns:
         Rendered template
     """
     # First handle simple placeholders like {key.field}
     result = template
-    
+
     # Find all placeholders in the format {key.field}
     simple_placeholders = re.findall(r'\{([^{}]+)\}', template)
-    
+
     for placeholder in simple_placeholders:
         parts = placeholder.split('.')
         if len(parts) == 1:
@@ -1336,33 +1337,33 @@ def render_template(template, query_results):
                 # Use the first result's field
                 if field in query_results[key][0]:
                     result = result.replace(f"{{{key}.{field}}}", str(query_results[key][0][field]))
-    
+
     # Now handle loop templates like {% for item in items %}...{% endfor %}
     loop_pattern = r'{%\s*for\s+(\w+)\s+in\s+(\w+)\s*%}(.*?){%\s*endfor\s*%}'
-    
+
     # Find all loop blocks
     loop_blocks = re.findall(loop_pattern, result, re.DOTALL)
-    
+
     for var_name, collection_name, block_content in loop_blocks:
         if collection_name in query_results and isinstance(query_results[collection_name], list):
             collection = query_results[collection_name]
-            
+
             # Process the loop
             rendered_items = []
             for i, item in enumerate(collection):
                 # Create a context for this iteration
                 context = {var_name: item, "loop": {"index": i + 1}}
-                
+
                 # Render the block content with this context
                 item_result = block_content
-                
+
                 # Replace {{var.field}} references
                 var_pattern = r'{{([\w.]+)}}'
                 var_matches = re.findall(var_pattern, block_content)
-                
+
                 for var_ref in var_matches:
                     var_parts = var_ref.split('.')
-                    
+
                     if var_parts[0] == var_name and len(var_parts) > 1:
                         # It's a reference to the loop variable, like {{item.field}}
                         field = var_parts[1]
@@ -1373,13 +1374,13 @@ def render_template(template, query_results):
                         loop_attr = var_parts[1]
                         if loop_attr in context["loop"]:
                             item_result = item_result.replace(f"{{{{{var_ref}}}}}", str(context["loop"][loop_attr]))
-                
+
                 rendered_items.append(item_result)
-            
+
             # Replace the entire loop block with the rendered items
             loop_str = f"{{% for {var_name} in {collection_name} %}}{block_content}{{% endfor %}}"
             result = result.replace(loop_str, "".join(rendered_items))
-    
+
     return result
 def get_or_create_memory(conversation_id, api_key, provider="OpenAI", base_url=None):
     if conversation_id not in conversation_memories:
@@ -1395,7 +1396,7 @@ def get_or_create_memory(conversation_id, api_key, provider="OpenAI", base_url=N
             max_token_limit=3000,
             return_messages=True
         )
-        
+
         # Load recent messages from database (limit to last 10)
         messages = frappe.get_all(
             "Chatbot Message",
@@ -1407,16 +1408,16 @@ def get_or_create_memory(conversation_id, api_key, provider="OpenAI", base_url=N
             order_by="creation desc",
             limit=10
         )
-        
+
         # Add messages in reverse order (oldest first)
         for msg in reversed(messages):
             if msg.message_type == "user":
                 memory.chat_memory.add_user_message(msg.content)
             elif msg.message_type == "bot":
                 memory.chat_memory.add_ai_message(msg.content)
-        
+
         conversation_memories[conversation_id] = memory
-    
+
     return conversation_memories[conversation_id]
 
 @frappe.whitelist()
@@ -1424,7 +1425,7 @@ def reset_conversation(conversation_id):
     """Reset the conversation memory"""
     if conversation_id in conversation_memories:
         del conversation_memories[conversation_id]
-    
+
     return {
         "success": True,
         "message": "Conversation reset successfully"
@@ -1451,7 +1452,7 @@ def get_conversations():
     """Get all conversations for the current user"""
     try:
         user = frappe.session.user
-        
+
         conversations = frappe.get_all(
             "Chatbot Conversation",
             fields=["name", "title", "creation", "modified as last_updated"],
@@ -1461,7 +1462,7 @@ def get_conversations():
             },
             order_by="modified asc"
         )
-        
+
         return {
             "success": True,
             "conversations": conversations
@@ -1478,7 +1479,7 @@ def create_conversation():
     """Create a new conversation"""
     try:
         user = frappe.session.user
-        
+
         # Create conversation document
         conversation = frappe.get_doc({
             "doctype": "Chatbot Conversation",
@@ -1486,9 +1487,9 @@ def create_conversation():
             "title": "New Conversation",  # Default title, will be updated later
             "status": "Active"
         })
-        
+
         conversation.insert(ignore_permissions=True)
-        
+
         return {
             "success": True,
             "conversation_id": conversation.name
@@ -1505,12 +1506,12 @@ def get_conversation_messages(conversation_id):
     """Get all messages for a specific conversation"""
     try:
         user = frappe.session.user
-        
+
         # Check if the user has access to this conversation
         conversation = frappe.get_doc("Chatbot Conversation", conversation_id)
         if conversation.user != user:
             frappe.throw(_("You don't have permission to access this conversation"))
-        
+
         # Get all messages
         messages = frappe.get_all(
             "Chatbot Message",
@@ -1520,7 +1521,7 @@ def get_conversation_messages(conversation_id):
             },
             order_by="creation asc"
         )
-        
+
         return {
             "success": True,
             "messages": messages
@@ -1653,12 +1654,12 @@ def save_message(conversation_id, message_type, content, is_error=0):
     """Save a message to a conversation"""
     try:
         user = frappe.session.user
-        
+
         # Check if the user has access to this conversation
         conversation = frappe.get_doc("Chatbot Conversation", conversation_id)
         if conversation.user != user:
             frappe.throw(_("You don't have permission to access this conversation"))
-        
+
         # Create message
         message = frappe.get_doc({
             "doctype": "Chatbot Message",
@@ -1667,9 +1668,9 @@ def save_message(conversation_id, message_type, content, is_error=0):
             "content": content,
             "is_error": is_error
         })
-        
+
         message.insert(ignore_permissions=True)
-        
+
         # Update conversation title if this is the first user message
         if message_type == 'user':
             message_count = frappe.db.count(
@@ -1679,13 +1680,13 @@ def save_message(conversation_id, message_type, content, is_error=0):
                     "message_type": "user"
                 }
             )
-            
+
             if message_count <= 1:
                 # Use the first 30 characters as the title
                 title = content[:30] + ("..." if len(content) > 30 else "")
                 conversation.title = title
                 conversation.save(ignore_permissions=True)
-        
+
         return {
             "success": True,
             "message_id": message.name
