@@ -435,4 +435,85 @@
 /*////////////////////////////////////*/
 
 
+/* Voice Controls */
+.voice-controls {
+    padding: 5px 10px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
 
+.voice-language-selector {
+    flex: 1;
+    font-size: 12px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: var(--bg-color);
+}
+
+/* Voice Input Button */
+.voice-input-button {
+    margin-right: 5px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+.voice-input-button.listening {
+    background-color: #dc3545;
+    color: white;
+    animation: pulse 1.5s infinite;
+}
+
+.voice-input-button.listening i {
+    animation: none;
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(220, 53, 69, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+    }
+}
+
+/* Voice Active State for Input */
+.chat-input.voice-active {
+    border: 1px solid #dc3545;
+    box-shadow: 0 0 5px rgba(220, 53, 69, 0.3);
+}
+
+/* Voice Interim Text */
+.voice-interim {
+    opacity: 0.6;
+    font-style: italic;
+    color: var(--text-muted);
+    display: inline-block;
+    margin-left: 4px;
+}
+
+/* Adjust chat input container for voice button */
+.chat-input-container {
+    gap: 5px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+    .voice-controls {
+        padding: 5px;
+    }
+
+    .voice-language-selector {
+        font-size: 11px;
+    }
+}

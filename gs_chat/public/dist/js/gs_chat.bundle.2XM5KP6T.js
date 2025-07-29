@@ -355,6 +355,186 @@
     }
   };
 
+  // ../gs_chat/gs_chat/public/js/voice_input.js
+  var VoiceInputManager = class {
+    constructor(chatInput, onResult) {
+      this.chatInput = chatInput;
+      this.onResult = onResult;
+      this.recognition = null;
+      this.isListening = false;
+      this.supportedLanguages = {
+        "en-US": "English (US)",
+        "en-GB": "English (UK)",
+        "es-ES": "Spanish",
+        "fr-FR": "French",
+        "de-DE": "German",
+        "it-IT": "Italian",
+        "pt-BR": "Portuguese (Brazil)",
+        "zh-CN": "Chinese (Mandarin)",
+        "ja-JP": "Japanese",
+        "ko-KR": "Korean",
+        "hi-IN": "Hindi",
+        "ar-SA": "Arabic",
+        "ru-RU": "Russian"
+      };
+      this.currentLanguage = "en-US";
+      this.initializeSpeechRecognition();
+    }
+    initializeSpeechRecognition() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        console.warn("Speech recognition not supported");
+        return false;
+      }
+      this.recognition = new SpeechRecognition();
+      this.recognition.continuous = false;
+      this.recognition.interimResults = true;
+      this.recognition.maxAlternatives = 1;
+      this.recognition.lang = this.currentLanguage;
+      this.recognition.onstart = () => {
+        this.isListening = true;
+        this.updateUI(true);
+      };
+      this.recognition.onend = () => {
+        this.isListening = false;
+        this.updateUI(false);
+      };
+      this.recognition.onresult = (event) => {
+        let finalTranscript = "";
+        let interimTranscript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + " ";
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+        if (interimTranscript) {
+          this.showInterimResult(interimTranscript);
+        }
+        if (finalTranscript) {
+          this.processFinalResult(finalTranscript.trim());
+        }
+      };
+      this.recognition.onerror = (event) => {
+        console.log(event);
+        console.error("Speech recognition error:", event.error);
+        this.handleError(event.error);
+        this.isListening = false;
+        this.updateUI(false);
+      };
+      return true;
+    }
+    toggle() {
+      if (this.isListening) {
+        this.stop();
+      } else {
+        this.start();
+      }
+    }
+    start() {
+      if (!this.recognition) {
+        frappe.show_alert({
+          message: __("Speech recognition not supported in your browser"),
+          indicator: "red"
+        });
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(() => {
+        this.recognition.lang = this.currentLanguage;
+        this.recognition.start();
+      }).catch((err) => {
+        frappe.show_alert({
+          message: __("Microphone access denied"),
+          indicator: "red"
+        });
+      });
+    }
+    stop() {
+      if (this.recognition && this.isListening) {
+        this.recognition.stop();
+      }
+    }
+    setLanguage(langCode) {
+      if (this.supportedLanguages[langCode]) {
+        this.currentLanguage = langCode;
+        localStorage.setItem("chatbot-voice-language", langCode);
+      }
+    }
+    showInterimResult(text) {
+      const existingInterim = this.chatInput.find(".voice-interim");
+      if (existingInterim.length) {
+        existingInterim.text(text);
+      } else {
+        this.chatInput.append(`<span class="voice-interim">${text}</span>`);
+      }
+    }
+    processFinalResult(text) {
+      this.chatInput.find(".voice-interim").remove();
+      const currentText = this.chatInput.text().trim();
+      const newText = currentText ? currentText + " " + text : text;
+      this.chatInput.text(newText);
+      this.moveCursorToEnd();
+      if (this.onResult) {
+        this.onResult(text);
+      }
+    }
+    moveCursorToEnd() {
+      const range = document.createRange();
+      const selection = window.getSelection();
+      range.selectNodeContents(this.chatInput[0]);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      this.chatInput[0].focus();
+    }
+    handleError(error) {
+      const errorMessages = {
+        "no-speech": __("No speech detected. Please try again."),
+        "audio-capture": __("No microphone found."),
+        "not-allowed": __("Microphone permission denied."),
+        "network": __("Network error. Please check your connection.")
+      };
+      frappe.show_alert({
+        message: errorMessages[error] || __("Speech recognition error: ") + error,
+        indicator: "red"
+      });
+    }
+    updateUI(isListening) {
+      const voiceButton = $(".voice-input-button");
+      if (isListening) {
+        voiceButton.addClass("listening");
+        voiceButton.find("i").removeClass("fa-microphone").addClass("fa-microphone-slash");
+      } else {
+        voiceButton.removeClass("listening");
+        voiceButton.find("i").removeClass("fa-microphone-slash").addClass("fa-microphone");
+      }
+    }
+    createUI() {
+      const voiceButton = $(`
+            <button class="btn btn-sm voice-input-button" title="${__("Voice Input")}">
+                <i class="fa fa-microphone"></i>
+            </button>
+        `);
+      const langSelector = $(`
+            <select class="voice-language-selector" title="${__("Select Language")}">
+                ${Object.entries(this.supportedLanguages).map(
+        ([code, name]) => `<option value="${code}" ${code === this.currentLanguage ? "selected" : ""}>${name}</option>`
+      ).join("")}
+            </select>
+        `);
+      voiceButton.on("click", () => this.toggle());
+      langSelector.on("change", (e) => this.setLanguage(e.target.value));
+      const savedLang = localStorage.getItem("chatbot-voice-language");
+      if (savedLang && this.supportedLanguages[savedLang]) {
+        this.currentLanguage = savedLang;
+        langSelector.val(savedLang);
+      }
+      return { voiceButton, langSelector };
+    }
+  };
+
   // ../gs_chat/gs_chat/public/js/gs_chat.bundle.js
   frappe.provide("gs_chat");
   gs_chat.ChatbotWidget = class {
@@ -367,6 +547,8 @@
       this.sidebarOpen = false;
       this.setupIcon();
       this.fetchConversations();
+      this.autoSendAfterVoice = localStorage.getItem("chatbot-auto-send-voice") === "true";
+      this.voiceShortcutEnabled = localStorage.getItem("chatbot-voice-shortcut") !== "false";
     }
     setupIcon() {
       const $chatbotIcon = $(`
@@ -446,8 +628,24 @@
                         </div>
                     </div>
                     <div class="chat-footer">
+                        <div class="voice-controls">
+                            <select class="voice-language-selector" title="${__("Select Language")}">
+                                <option value="en-US">English (US)</option>
+                                <option value="es-ES">Spanish</option>
+                                <option value="fr-FR">French</option>
+                                <option value="de-DE">German</option>
+                                <option value="zh-CN">Chinese</option>
+                                <option value="hi-IN">Hindi</option>
+                                <option value="ar-SA">Arabic</option>
+                                <option value="ja-JP">Japanese</option>
+                                <option value="ko-KR">Korean</option>
+                            </select>
+                        </div>
                         <div class="chat-input-container">
                             <span class="chat-input" data-placeholder="Ask anything..." contenteditable="true" enterkeyhint="enter" tabindex="0"></span>
+                            <button class="btn btn-sm voice-input-button" title="${__("Voice Input")}">
+                                <i class="fa fa-microphone"></i>
+                            </button>
                             <button class="btn btn-primary btn-sm send-button">
                                 <i class="fa fa-paper-plane"></i>
                             </button>
@@ -496,6 +694,8 @@
         me.toggleSidebar();
       });
       this.fixPlaceholder();
+      this.setupVoiceInput();
+      this.setupKeyboardShortcuts();
     }
     toggleSidebar() {
       this.chatDialog.toggleClass("sidebar-hidden");
@@ -948,6 +1148,140 @@
         }
       }
     }
+    setupVoiceInput() {
+      const me = this;
+      this.voiceManager = new VoiceInputManager(
+        this.chatInput,
+        (text) => {
+          if (me.autoSendAfterVoice) {
+            setTimeout(() => me.sendMessage(), 500);
+          }
+        }
+      );
+      const voiceButton = this.chatDialog.find(".voice-input-button");
+      const langSelector = this.chatDialog.find(".voice-language-selector");
+      voiceButton.on("click", () => {
+        me.voiceManager.toggle();
+      });
+      langSelector.on("change", (e) => {
+        me.voiceManager.setLanguage(e.target.value);
+      });
+      const savedLang = localStorage.getItem("chatbot-voice-language");
+      if (savedLang) {
+        langSelector.val(savedLang);
+        me.voiceManager.setLanguage(savedLang);
+      }
+      this.voiceManager.updateUI = (isListening) => {
+        if (isListening) {
+          voiceButton.addClass("listening");
+          voiceButton.find("i").removeClass("fa-microphone").addClass("fa-microphone-slash");
+          me.chatInput.addClass("voice-active");
+        } else {
+          voiceButton.removeClass("listening");
+          voiceButton.find("i").removeClass("fa-microphone-slash").addClass("fa-microphone");
+          me.chatInput.removeClass("voice-active");
+        }
+      };
+      this.voiceManager.showInterimResult = (text) => {
+        const existingInterim = me.chatInput.find(".voice-interim");
+        if (existingInterim.length) {
+          existingInterim.text(text);
+        } else {
+          me.chatInput.append(`<span class="voice-interim">${text}</span>`);
+        }
+      };
+      this.voiceManager.processFinalResult = (text) => {
+        me.chatInput.find(".voice-interim").remove();
+        const currentText = me.getQueryText().trim();
+        if (currentText) {
+          me.chatInput.append(document.createTextNode(" " + text));
+        } else {
+          me.chatInput.text(text);
+        }
+        me.voiceManager.moveCursorToEnd();
+        me.chatInput.trigger("input");
+      };
+    }
+    toggleAutoSendVoice() {
+      this.autoSendAfterVoice = !this.autoSendAfterVoice;
+      localStorage.setItem("chatbot-auto-send-voice", this.autoSendAfterVoice);
+      frappe.show_alert({
+        message: this.autoSendAfterVoice ? __("Auto-send after voice input enabled") : __("Auto-send after voice input disabled"),
+        indicator: "blue"
+      });
+    }
+    setupKeyboardShortcuts() {
+      const me = this;
+      $(document).on("keydown", function(e) {
+        if (me.isOpen && me.voiceShortcutEnabled) {
+          if (e.ctrlKey && e.shiftKey && e.key === "V") {
+            e.preventDefault();
+            if (me.voiceManager) {
+              me.voiceManager.toggle();
+            }
+          }
+        }
+      });
+      this.chatInput.on("keydown", function(e) {
+        if (e.key === "Escape" && me.voiceManager && me.voiceManager.isListening) {
+          e.preventDefault();
+          me.voiceManager.stop();
+        }
+      });
+    }
+    createVoiceSettingsMenu() {
+      const settingsButton = $(`
+        <button class="btn btn-xs voice-settings-btn" title="${__("Voice Settings")}">
+        <i class="fa fa-cog"></i>
+        </button>
+        `);
+      settingsButton.on("click", () => {
+        this.showVoiceSettings();
+      });
+      return settingsButton;
+    }
+    showVoiceSettings() {
+      const dialog = new frappe.ui.Dialog({
+        title: __("Voice Input Settings"),
+        fields: [
+          {
+            fieldname: "auto_send",
+            fieldtype: "Check",
+            label: __("Auto-send after voice input"),
+            default: this.autoSendAfterVoice ? 1 : 0
+          },
+          {
+            fieldname: "keyboard_shortcut",
+            fieldtype: "Check",
+            label: __("Enable keyboard shortcut (Ctrl+Shift+V)"),
+            default: this.voiceShortcutEnabled ? 1 : 0
+          },
+          {
+            fieldname: "continuous_mode",
+            fieldtype: "Check",
+            label: __("Continuous listening mode"),
+            default: 0,
+            description: __("Keep listening after each phrase")
+          }
+        ],
+        primary_action_label: __("Save"),
+        primary_action: (values) => {
+          this.autoSendAfterVoice = values.auto_send;
+          this.voiceShortcutEnabled = values.keyboard_shortcut;
+          localStorage.setItem("chatbot-auto-send-voice", values.auto_send);
+          localStorage.setItem("chatbot-voice-shortcut", values.keyboard_shortcut);
+          if (this.voiceManager) {
+            this.voiceManager.recognition.continuous = values.continuous_mode;
+          }
+          dialog.hide();
+          frappe.show_alert({
+            message: __("Voice settings saved"),
+            indicator: "green"
+          });
+        }
+      });
+      dialog.show();
+    }
   };
   $(document).ready(function() {
     frappe.after_ajax(() => {
@@ -956,4 +1290,4 @@
     });
   });
 })();
-//# sourceMappingURL=gs_chat.bundle.HM35GGTD.js.map
+//# sourceMappingURL=gs_chat.bundle.2XM5KP6T.js.map

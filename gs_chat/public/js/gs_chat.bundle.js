@@ -1,6 +1,7 @@
 frappe.provide("gs_chat");
 
 import { SlashCommandManager } from "./slash_commands.js"
+import { VoiceInputManager } from "./voice_input.js"
 
 gs_chat.ChatbotWidget = class {
     constructor() {
@@ -12,6 +13,9 @@ gs_chat.ChatbotWidget = class {
         this.sidebarOpen = false;
         this.setupIcon();
         this.fetchConversations();
+
+        this.autoSendAfterVoice = localStorage.getItem('chatbot-auto-send-voice') === 'true';
+        this.voiceShortcutEnabled = localStorage.getItem('chatbot-voice-shortcut') !== 'false';
     }
 
     setupIcon() {
@@ -108,8 +112,24 @@ gs_chat.ChatbotWidget = class {
                         </div>
                     </div>
                     <div class="chat-footer">
+                        <div class="voice-controls">
+                            <select class="voice-language-selector" title="${__('Select Language')}">
+                                <option value="en-US">English (US)</option>
+                                <option value="es-ES">Spanish</option>
+                                <option value="fr-FR">French</option>
+                                <option value="de-DE">German</option>
+                                <option value="zh-CN">Chinese</option>
+                                <option value="hi-IN">Hindi</option>
+                                <option value="ar-SA">Arabic</option>
+                                <option value="ja-JP">Japanese</option>
+                                <option value="ko-KR">Korean</option>
+                            </select>
+                        </div>
                         <div class="chat-input-container">
                             <span class="chat-input" data-placeholder="Ask anything..." contenteditable="true" enterkeyhint="enter" tabindex="0"></span>
+                            <button class="btn btn-sm voice-input-button" title="${__('Voice Input')}">
+                                <i class="fa fa-microphone"></i>
+                            </button>
                             <button class="btn btn-primary btn-sm send-button">
                                 <i class="fa fa-paper-plane"></i>
                             </button>
@@ -172,6 +192,9 @@ gs_chat.ChatbotWidget = class {
         });
 
         this.fixPlaceholder();
+
+        this.setupVoiceInput();
+        this.setupKeyboardShortcuts();
     }
     
     toggleSidebar() {
@@ -808,6 +831,188 @@ gs_chat.ChatbotWidget = class {
                 this.sidebarOpen = true;
             }
         }
+    }
+
+    setupVoiceInput() {
+        const me = this;
+
+        // Initialize VoiceInputManager
+        this.voiceManager = new VoiceInputManager(
+            this.chatInput,
+            (text) => {
+                // Optional: trigger send after voice input
+                if (me.autoSendAfterVoice) {
+                    setTimeout(() => me.sendMessage(), 500);
+                }
+            }
+        );
+
+        // Get UI elements
+        const voiceButton = this.chatDialog.find('.voice-input-button');
+        const langSelector = this.chatDialog.find('.voice-language-selector');
+
+        // Setup event handlers
+        voiceButton.on('click', () => {
+            me.voiceManager.toggle();
+        });
+
+        langSelector.on('change', (e) => {
+            me.voiceManager.setLanguage(e.target.value);
+        });
+
+        // Load saved language preference
+        const savedLang = localStorage.getItem('chatbot-voice-language');
+        if (savedLang) {
+            langSelector.val(savedLang);
+            me.voiceManager.setLanguage(savedLang);
+        }
+
+        // Update UI based on listening state
+        this.voiceManager.updateUI = (isListening) => {
+            if (isListening) {
+                voiceButton.addClass('listening');
+                voiceButton.find('i').removeClass('fa-microphone').addClass('fa-microphone-slash');
+                // Show visual indicator
+                me.chatInput.addClass('voice-active');
+            } else {
+                voiceButton.removeClass('listening');
+                voiceButton.find('i').removeClass('fa-microphone-slash').addClass('fa-microphone');
+                me.chatInput.removeClass('voice-active');
+            }
+        };
+
+        // Handle voice input display
+        this.voiceManager.showInterimResult = (text) => {
+            const existingInterim = me.chatInput.find('.voice-interim');
+            if (existingInterim.length) {
+                existingInterim.text(text);
+            } else {
+                me.chatInput.append(`<span class="voice-interim">${text}</span>`);
+            }
+        };
+
+        // Process final result
+        this.voiceManager.processFinalResult = (text) => {
+            // Remove interim display
+            me.chatInput.find('.voice-interim').remove();
+
+            // Get current content
+            const currentText = me.getQueryText().trim();
+
+            // Append to existing text or replace
+            if (currentText) {
+                // Add space and append
+                me.chatInput.append(document.createTextNode(' ' + text));
+            } else {
+                me.chatInput.text(text);
+            }
+
+            // Move cursor to end
+            me.voiceManager.moveCursorToEnd();
+
+            // Trigger input event for placeholder handling
+            me.chatInput.trigger('input');
+        };
+    }
+
+    toggleAutoSendVoice() {
+        this.autoSendAfterVoice = !this.autoSendAfterVoice;
+        localStorage.setItem('chatbot-auto-send-voice', this.autoSendAfterVoice);
+
+        frappe.show_alert({
+            message: this.autoSendAfterVoice ?
+            __('Auto-send after voice input enabled') :
+            __('Auto-send after voice input disabled'),
+                          indicator: 'blue'
+        });
+    }
+
+    setupKeyboardShortcuts() {
+        const me = this;
+
+        // Global keyboard shortcut for voice (Ctrl+Shift+V)
+        $(document).on('keydown', function(e) {
+            if (me.isOpen && me.voiceShortcutEnabled) {
+                // Ctrl+Shift+V for voice toggle
+                if (e.ctrlKey && e.shiftKey && e.key === 'V') {
+                    e.preventDefault();
+                    if (me.voiceManager) {
+                        me.voiceManager.toggle();
+                    }
+                }
+            }
+        });
+
+        // Escape to stop voice recording
+        this.chatInput.on('keydown', function(e) {
+            if (e.key === 'Escape' && me.voiceManager && me.voiceManager.isListening) {
+                e.preventDefault();
+                me.voiceManager.stop();
+            }
+        });
+    }
+
+    // 3. Settings menu for voice preferences
+    createVoiceSettingsMenu() {
+        const settingsButton = $(`
+        <button class="btn btn-xs voice-settings-btn" title="${__('Voice Settings')}">
+        <i class="fa fa-cog"></i>
+        </button>
+        `);
+
+        settingsButton.on('click', () => {
+            this.showVoiceSettings();
+        });
+
+        return settingsButton;
+    }
+
+    showVoiceSettings() {
+        const dialog = new frappe.ui.Dialog({
+            title: __('Voice Input Settings'),
+                                            fields: [
+                                                {
+                                                    fieldname: 'auto_send',
+                                                    fieldtype: 'Check',
+                                                    label: __('Auto-send after voice input'),
+                                            default: this.autoSendAfterVoice ? 1 : 0
+                                                },
+                                                {
+                                                    fieldname: 'keyboard_shortcut',
+                                                    fieldtype: 'Check',
+                                                    label: __('Enable keyboard shortcut (Ctrl+Shift+V)'),
+                                            default: this.voiceShortcutEnabled ? 1 : 0
+                                                },
+                                                {
+                                                    fieldname: 'continuous_mode',
+                                                    fieldtype: 'Check',
+                                                    label: __('Continuous listening mode'),
+                                            default: 0,
+                                                description: __('Keep listening after each phrase')
+                                                }
+                                            ],
+                                            primary_action_label: __('Save'),
+                                            primary_action: (values) => {
+                                                // Save preferences
+                                                this.autoSendAfterVoice = values.auto_send;
+                                                this.voiceShortcutEnabled = values.keyboard_shortcut;
+
+                                                localStorage.setItem('chatbot-auto-send-voice', values.auto_send);
+                                                localStorage.setItem('chatbot-voice-shortcut', values.keyboard_shortcut);
+
+                                                if (this.voiceManager) {
+                                                    this.voiceManager.recognition.continuous = values.continuous_mode;
+                                                }
+
+                                                dialog.hide();
+                                                frappe.show_alert({
+                                                    message: __('Voice settings saved'),
+                                                                  indicator: 'green'
+                                                });
+                                            }
+        });
+
+        dialog.show();
     }
 };
 
