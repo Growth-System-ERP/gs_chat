@@ -4,7 +4,11 @@ import time
 import os
 import json
 import ast
-
+import pickle
+import concurrent.futures
+import re
+from datetime import datetime, timedelta
+from gs_chat.controllers.industries import get_industry_handler
 
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -36,12 +40,21 @@ rag_cache = {
 class SmartRAGRetriever:
     """Enhanced RAG implementation with resource optimization for smaller instances"""
 
-    def __init__(self, api_key, provider="OpenAI", base_url=None, lightweight_mode=None):
+    def __init__(self, api_key, provider="OpenAI", base_url=None, lightweight_mode=None, industry=None):
         self.api_key = api_key
         self.provider = provider
         self.base_url = base_url
         self.app_path = frappe.get_app_path("gs_chat")
         self.site_path = frappe.get_site_path()
+
+        # ADD: Industry handler initialization
+        self.industry_handler = get_industry_handler(industry)
+
+        # Cache configuration with industry-specific key
+        industry_suffix = f"_{industry}" if industry else ""
+        self.cache_key = f"gs_chat_vectors_{frappe.local.site}{industry_suffix}"
+        self.cache_ttl = 3600
+        self.last_update_key = f"gs_chat_last_update_{frappe.local.site}{industry_suffix}"
 
         # Auto-detect lightweight mode based on system resources
         if lightweight_mode is None:
@@ -49,21 +62,90 @@ class SmartRAGRetriever:
         else:
             self.lightweight_mode = lightweight_mode
 
-        # Adjust settings based on mode
+        # MODIFY THIS SECTION: Try to load from cache first
+        if not self.lightweight_mode:
+            self.embeddings = self._get_embeddings()
+
+            # Try loading from cache
+            cached_store = self._load_from_cache()
+            if cached_store:
+                self.vector_store = cached_store
+                frappe.logger().info("Loaded vector store from cache")
+            else:
+                # Build and cache if not found
+                self._rebuild_and_cache_vector_store()
+        else:
+            self.embeddings = None
+
+        # Keep the existing text_splitter configuration
         if self.lightweight_mode:
-            self.embeddings = None  # Skip embeddings for lightweight mode
             self.text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=500,    # Smaller chunks
-                chunk_overlap=50,  # Less overlap
+                chunk_size=500,
+                chunk_overlap=50,
                 separators=["\n\n", "\n"]
             )
         else:
-            self.embeddings = self._get_embeddings()
             self.text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=1000,
                 chunk_overlap=200,
-                separators=["\n\n", "\n", " ", ""]
+                separators=["\n\n", "\n", ".", " ", ""]
             )
+
+    def search(self, query, k=5):
+        """Enhanced search with industry-specific preprocessing"""
+
+        # Use industry handler to preprocess query if available
+        if self.industry_handler:
+            enhanced_query = self.industry_handler.preprocess_query(query)
+        else:
+            enhanced_query = query
+
+        if self.lightweight_mode:
+            return self._simple_search(enhanced_query, k)
+        else:
+            if self.vector_store:
+                return self.vector_store.similarity_search(enhanced_query, k=k)
+            else:
+                return []
+
+    def _load_from_cache(self):
+        """Load vector store from cache if available and not stale"""
+        try:
+            cached_data = frappe.cache().get_value(self.cache_key)
+            if cached_data:
+                # Check if cache is still valid
+                last_update = frappe.cache().get_value(self.last_update_key)
+                if last_update:
+                    last_update_time = datetime.fromisoformat(last_update)
+                    if datetime.now() - last_update_time < timedelta(seconds=self.cache_ttl):
+                        return pickle.loads(cached_data)
+        except Exception as e:
+            frappe.logger().error(f"Error loading from cache: {str(e)}")
+        return None
+
+    def _rebuild_and_cache_vector_store(self):
+        """Build vector store and cache it"""
+        try:
+            # Build the vector store (use existing logic)
+            documents = self._load_all_documents()
+            if documents and self.embeddings:
+                self.vector_store = FAISS.from_documents(documents, self.embeddings)
+
+                # Cache the vector store
+                cached_data = pickle.dumps(self.vector_store)
+                frappe.cache().set_value(self.cache_key, cached_data)
+                frappe.cache().set_value(self.last_update_key, datetime.now().isoformat())
+                frappe.logger().info("Vector store cached successfully")
+        except Exception as e:
+            frappe.logger().error(f"Error building vector store: {str(e)}")
+
+    def _load_all_documents(self):
+        """Consolidated method to load all documents"""
+        documents = []
+        documents.extend(self._load_database_schema())
+        documents.extend(self._load_configuration_files())
+        # Add other document loading methods here
+        return documents
 
     def _get_embeddings(self):
         """Get embeddings model based on provider"""
@@ -692,49 +774,109 @@ class SmartRAGRetriever:
         documents = []
 
         try:
-            # Get all doctypes and their fields (with performance limits)
-            limit = 20 if self.lightweight_mode else 50
-            doctypes = frappe.get_all("DocType",
-                                    fields=["name", "module", "description", "is_submittable"],
-                                    filters={"custom": 0, "istable": 0},
-                                    limit=limit)
+            if self.industry_handler:
+                # Get priority doctypes from industry handler
+                priority_doctypes = self.industry_handler.get_priority_doctypes()
 
-            frappe.logger().info(f"Loading schema for {len(doctypes)} doctypes")
+                # Get schema filters from industry handler
+                schema_filters = self.industry_handler.get_schema_filters()
 
-            for doctype in doctypes:
-                try:
-                    # Get doctype fields
-                    fields = frappe.get_all("DocField",
-                                          fields=["fieldname", "fieldtype", "label", "options"],
-                                          filters={"parent": doctype.name},
-                                          order_by="idx")
+                # Load doctypes based on filters
+                all_doctypes = set(priority_doctypes)
 
-                    # Create schema documentation
-                    schema_info = f"DocType: {doctype.name}\n"
-                    schema_info += f"Module: {doctype.module}\n"
-                    if doctype.description:
-                        schema_info += f"Description: {doctype.description}\n"
-                    schema_info += f"Submittable: {'Yes' if doctype.is_submittable else 'No'}\n\n"
+                for filter_dict in schema_filters:
+                    filtered_doctypes = frappe.get_all("DocType",
+                        filters=filter_dict,
+                        pluck="name"
+                    )
+                    all_doctypes.update(filtered_doctypes)
 
-                    schema_info += "Fields:\n"
-                    for field in fields:
-                        schema_info += f"- {field.fieldname} ({field.fieldtype}): {field.label}\n"
-                        if field.options:
-                            schema_info += f"  Options: {field.options}\n"
+                # Load each doctype
+                for doctype_name in all_doctypes:
+                    try:
+                        if not frappe.db.exists("DocType", doctype_name):
+                            continue
 
-                    doc = Document(
-                        page_content=schema_info,
-                        metadata={
+                        doctype = frappe.get_doc("DocType", doctype_name)
+                        fields = doctype.fields
+
+                        # Build schema information
+                        schema_info = f"DocType: {doctype.name}\n"
+                        schema_info += f"Module: {doctype.module}\n"
+
+                        if doctype.description:
+                            schema_info += f"Description: {doctype.description}\n"
+                        schema_info += f"Submittable: {'Yes' if doctype.is_submittable else 'No'}\n\n"
+
+                        schema_info += "Fields:\n"
+                        for field in fields:
+                            schema_info += f"- {field.fieldname} ({field.fieldtype}): {field.label}\n"
+                            if field.options:
+                                schema_info += f"  Options: {field.options}\n"
+
+                        # Get industry-specific metadata
+                        metadata = {
                             "source": "Database Schema",
                             "doctype": doctype.name,
                             "module": doctype.module,
                             "type": "schema"
                         }
-                    )
-                    documents.append(doc)
 
-                except Exception as e:
-                    frappe.log_error(f"Error loading schema for {doctype.name}: {str(e)}")
+                        if self.industry_handler:
+                            metadata.update(self.industry_handler.get_document_metadata(doctype_name))
+
+                        doc = Document(
+                            page_content=schema_info,
+                            metadata=metadata
+                        )
+                        documents.append(doc)
+
+                    except Exception as e:
+                        frappe.log_error(f"Error loading schema for {doctype_name}: {str(e)}")
+            else:
+                # Get all doctypes and their fields (with performance limits)
+                limit = 20 if self.lightweight_mode else 50
+                doctypes = frappe.get_all("DocType",
+                                        fields=["name", "module", "description", "is_submittable"],
+                                        filters={"custom": 0, "istable": 0},
+                                        limit=limit)
+
+                frappe.logger().info(f"Loading schema for {len(doctypes)} doctypes")
+
+                for doctype in doctypes:
+                    try:
+                        # Get doctype fields
+                        fields = frappe.get_all("DocField",
+                                            fields=["fieldname", "fieldtype", "label", "options"],
+                                            filters={"parent": doctype.name},
+                                            order_by="idx")
+
+                        # Create schema documentation
+                        schema_info = f"DocType: {doctype.name}\n"
+                        schema_info += f"Module: {doctype.module}\n"
+                        if doctype.description:
+                            schema_info += f"Description: {doctype.description}\n"
+                        schema_info += f"Submittable: {'Yes' if doctype.is_submittable else 'No'}\n\n"
+
+                        schema_info += "Fields:\n"
+                        for field in fields:
+                            schema_info += f"- {field.fieldname} ({field.fieldtype}): {field.label}\n"
+                            if field.options:
+                                schema_info += f"  Options: {field.options}\n"
+
+                        doc = Document(
+                            page_content=schema_info,
+                            metadata={
+                                "source": "Database Schema",
+                                "doctype": doctype.name,
+                                "module": doctype.module,
+                                "type": "schema"
+                            }
+                        )
+                        documents.append(doc)
+
+                    except Exception as e:
+                        frappe.log_error(f"Error loading schema for {doctype.name}: {str(e)}")
 
         except Exception as e:
             frappe.log_error(f"Error loading database schema: {str(e)}")
@@ -875,6 +1017,12 @@ class SmartRAGRetriever:
             frappe.log_error(f"Error loading lightweight knowledge base: {str(e)}")
 
         return documents
+
+    def get_metrics(self):
+        """Get industry-specific metrics"""
+        if self.industry_handler:
+            return self.industry_handler.get_custom_metrics()
+        return {}
 
 
 
