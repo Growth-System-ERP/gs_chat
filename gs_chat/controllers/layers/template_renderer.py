@@ -1,7 +1,10 @@
 import re
 import frappe
+from frappe.utils.jinja import render_template as jinja_render
+
 
 def render_template(template, query_results):
+
     """
     Render a template with query results
 
@@ -14,27 +17,35 @@ def render_template(template, query_results):
     """
     import re
 
+    template = jinja_render(template, query_results)
+
     result = template
 
     # Handle array/index access like {{key[0].field}} or {{ key[0].field }}
     # Pattern matches: {{ key[index].field }} with optional spaces
-    array_pattern = r'\{\{\s*(\w+)\[(\d+)\]\.(\w+)\s*\}\}'
+    array_pattern = r'\{\{?\s*(\w+)(\[|\.)(\d+)\]?\.(\w+)\s*\}?\}'
     array_matches = re.findall(array_pattern, result)
 
-    for key, index, field in array_matches:
+    for key, _in, index, field in array_matches:
         index = int(index)
         if key in query_results and isinstance(query_results[key], list):
             if index < len(query_results[key]) and field in query_results[key][index]:
                 value = str(query_results[key][index][field])
+
                 # Replace with spaces preserved
+                if _in == "[":
+                    varformat = r'\{\{?\s*' + key + r'\[' + str(index) + r'\]\.' + field + r'\s*\}?\}'
+                else:
+                    varformat = r'\{\{?\s*' + key + r'\.' + str(index) + r'\.' + field + r'\s*\}?\}'
+
                 result = re.sub(
-                    r'\{\{\s*' + key + r'\[' + str(index) + r'\]\.' + field + r'\s*\}\}',
+                    varformat,
                     value,
                     result
                 )
 
     # Handle simple placeholders {{key.field}} with optional spaces
-    simple_pattern = r'\{\{\s*([^{}]+)\s*\}\}'
+    simple_pattern = r'\{\s*([^{}]+)\s*\}'
     simple_placeholders = re.findall(simple_pattern, result)
 
     for placeholder in simple_placeholders:
@@ -46,19 +57,26 @@ def render_template(template, query_results):
             key = parts[0]
             if key in query_results:
                 if isinstance(query_results[key], list) and query_results[key]:
-                    value = str(query_results[key][0])
+                    value = query_results[key][0]
+
+                    if isinstance(value, dict) and value.get(key):
+                        value = str(value.get(key))
+                    else:
+                        value = str(value)
                 else:
                     value = str(query_results[key])
+
                 # Replace with spaces
-                result = re.sub(r'\{\{\s*' + re.escape(placeholder) + r'\s*\}\}', value, result)
+                result = re.sub(r'\{\s*' + re.escape(placeholder) + r'\s*\}', value, result)
 
         elif len(parts) == 2 and '[' not in parts[0]:
             # Nested placeholder like {{key.field}}
             key, field = parts[0], parts[1]
+
             if key in query_results and isinstance(query_results[key], list) and query_results[key]:
                 if field in query_results[key][0]:
                     value = str(query_results[key][0][field])
-                    result = re.sub(r'\{\{\s*' + re.escape(placeholder) + r'\s*\}\}', value, result)
+                    result = re.sub(r'\{\{?\s*' + re.escape(placeholder) + r'\s*\}\}?', value, result)
 
     # Handle loop templates {% for item in items %}...{% endfor %}
     loop_pattern = r'\{%\s*for\s+(\w+)\s+in\s+(\w+)\s*%\}(.*?)\{%\s*endfor\s*%\}'
@@ -66,7 +84,6 @@ def render_template(template, query_results):
 
     for var_name, collection_name, block_content in loop_blocks:
         collection = None
-
         # Direct match
         if collection_name in query_results:
             collection = query_results[collection_name]
@@ -83,7 +100,7 @@ def render_template(template, query_results):
                 item_result = block_content
 
                 # Replace {{var.field}} with spaces
-                var_pattern = r'\{\{\s*([\w.]+)\s*\}\}'
+                var_pattern = r'\{\{?\s*([\w.]+)\s*\}?\}'
                 var_matches = re.findall(var_pattern, block_content)
 
                 for var_ref in var_matches:
@@ -101,17 +118,18 @@ def render_template(template, query_results):
                     elif var_parts[0] == "loop" and len(var_parts) > 1:
                         if var_parts[1] == "index":
                             item_result = re.sub(
-                                r'\{\{\s*' + re.escape(var_ref) + r'\s*\}\}',
+                                r'\{\{?\s*' + re.escape(var_ref) + r'\s*\}?\}',
                                 f"\n{str(i + 1)}",
                                 item_result
                             )
 
                 rendered_items.append(item_result)
+                # if len(collection) == len(rendered_items):
+                #     rendered_items.append("\n")
 
             # Replace the entire loop block
             full_pattern = r'\{%\s*for\s+' + var_name + r'\s+in\s+' + collection_name + r'\s*%\}.*?\{%\s*endfor\s*%\}'
             result = re.sub(full_pattern, "".join(rendered_items), result, flags=re.DOTALL)
 
-    frappe.log_error("resp", repr([result, query_results, template]))
 
     return result

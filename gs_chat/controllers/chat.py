@@ -15,6 +15,7 @@ from pathlib import Path
 from langchain_openai import ChatOpenAI
 from langchain.chains import ConversationChain
 
+from langchain_core.messages import SystemMessage
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 
 # Store conversation memories and settings cache
@@ -121,7 +122,7 @@ def process_message(query, references=None, conversation_id=None):
             relevant_docs = rag_retriever.get_relevant_documents(query, top_k=5)
             frappe.logger().info(f"RAG retrieved {len(relevant_docs)} documents")
         except Exception as e:
-            frappe.log_error(f"RAG initialization/retrieval failed: {str(e)}")
+            frappe.log_error(f"RAG initialization/retrieval failed", str(e))
             # Continue without RAG - system will work with basic prompt only
             frappe.logger().warning("Continuing without RAG context due to error")
 
@@ -136,7 +137,9 @@ def process_message(query, references=None, conversation_id=None):
             rag_context = "\n\n📚 RELEVANT KNOWLEDGE BASE:\n"
             for i, doc in enumerate(relevant_docs, 1):
                 rag_context += f"\n{i}. Source: {doc['source']}\n"
-                escaped_content = doc['content'][:500].replace('{', '{{').replace('}', '}}')
+                content = doc['content'][:500]
+                escaped_content = content.replace('{{', '{').replace('}}', '}')
+                escaped_content = content.replace('{', '{{').replace('}', '}}')
                 rag_context += f"Content: {escaped_content}...\n"
             complete_system_prompt += rag_context
 
@@ -144,7 +147,7 @@ def process_message(query, references=None, conversation_id=None):
         # Schema information is now included in RAG context above
 
         prompt = ChatPromptTemplate.from_messages([
-            SystemMessagePromptTemplate.from_template(complete_system_prompt),
+            SystemMessage(content=complete_system_prompt),
             MessagesPlaceholder(variable_name="history"),
             HumanMessagePromptTemplate.from_template("Generate a response for: {input}")
         ])
@@ -185,7 +188,6 @@ def process_message(query, references=None, conversation_id=None):
 
             # Parse the JSON
             analysis_data = json.loads(json_str)
-            frappe.log_error("resp", repr(analysis_data))
 
             # Check if this needs database access
             needs_data = analysis_data.get("needs_data", False)
@@ -223,7 +225,7 @@ def process_message(query, references=None, conversation_id=None):
                 response = analysis_data.get("response", "I understand your question, but I don't have a specific answer for that.")
 
         except Exception as e:
-            frappe.log_error(f"Error processing analysis result: {str(e)}\nResult: {response}")
+            frappe.log_error(f"Error processing analysis result", f"{str(e)}\nResult: {response}")
             # Fallback to sending the raw analysis result
             response = f"I analyzed your question but encountered an error. Here's what I found:\n\n{response}"
 
@@ -250,7 +252,7 @@ def process_message(query, references=None, conversation_id=None):
         }
 
     except Exception as e:
-        frappe.log_error(f"Chatbot Error: {str(e)}")
+        frappe.log_error("Chatbot Error", str(e))
         return {
             "success": False,
             "error": str(e)
@@ -282,7 +284,7 @@ def log_interaction(query, response, has_context):
         })
         doc.insert(ignore_permissions=True)
     except Exception as e:
-        frappe.log_error(f"Failed to log chatbot interaction: {str(e)}")
+        frappe.log_error(f"Failed to log chatbot interaction", str(e))
 
 @frappe.whitelist()
 def get_conversations():
@@ -305,7 +307,7 @@ def get_conversations():
             "conversations": conversations
         }
     except Exception as e:
-        frappe.log_error(f"Failed to get conversations: {str(e)}")
+        frappe.log_error(f"Failed to get conversations", str(e))
         return {
             "success": False,
             "error": str(e)
@@ -332,7 +334,7 @@ def create_conversation():
             "conversation_id": conversation.name
         }
     except Exception as e:
-        frappe.log_error(f"Failed to create conversation: {str(e)}")
+        frappe.log_error(f"Failed to create conversation", str(e))
         return {
             "success": False,
             "error": str(e)
@@ -364,7 +366,7 @@ def get_conversation_messages(conversation_id):
             "messages": messages
         }
     except Exception as e:
-        frappe.log_error(f"Failed to get conversation messages: {str(e)}")
+        frappe.log_error(f"Failed to get conversation messages", str(e))
         return {
             "success": False,
             "error": str(e)
@@ -402,7 +404,7 @@ def get_available_models(provider=None):
             }
 
     except Exception as e:
-        frappe.log_error(f"Failed to get available models: {str(e)}")
+        frappe.log_error(f"Failed to get available models", str(e))
         return {
             "success": False,
             "error": str(e)
@@ -451,7 +453,7 @@ def save_message(conversation_id, message_type, content, is_error=0):
             "message_id": message.name
         }
     except Exception as e:
-        frappe.log_error(f"Failed to save message: {str(e)}")
+        frappe.log_error(f"Failed to save message", str(e))
         return {
             "success": False,
             "error": str(e)
