@@ -137,14 +137,12 @@ def process_message(query, references=None, conversation_id=None):
             rag_context = "\n\n📚 RELEVANT KNOWLEDGE BASE:\n"
             for i, doc in enumerate(relevant_docs, 1):
                 rag_context += f"\n{i}. Source: {doc['source']}\n"
-                content = doc['content'][:500]
+                content = doc['content']
                 escaped_content = content.replace('{{', '{').replace('}}', '}')
                 escaped_content = content.replace('{', '{{').replace('}', '}}')
                 rag_context += f"Content: {escaped_content}...\n"
+            print(rag_context)
             complete_system_prompt += rag_context
-
-        # frappe.log_error("rag context", complete_system_prompt)
-        # Schema information is now included in RAG context above
 
         prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content=complete_system_prompt),

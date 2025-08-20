@@ -78,18 +78,11 @@ class SmartRAGRetriever:
             self.embeddings = None
 
         # Keep the existing text_splitter configuration
-        if self.lightweight_mode:
-            self.text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=500,
-                chunk_overlap=50,
-                separators=["\n\n", "\n"]
-            )
-        else:
-            self.text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200,
-                separators=["\n\n", "\n", ".", " ", ""]
-            )
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=2000,  # Increase from 500/1000
+            chunk_overlap=200,
+            separators=["\n\n", "\n---\n", "\nFields:\n", "\n"]  # Better separators
+        )
 
     def search(self, query, k=5):
         """Enhanced search with industry-specific preprocessing"""
@@ -552,6 +545,10 @@ class SmartRAGRetriever:
             "Opportunity", "Delivery Note", "Purchase Receipt"
         ]
 
+        if self.industry_handler:
+                essential_doctypes = self.industry_handler.get_priority_doctypes()
+                # schema_filters = self.industry_handler.get_schema_filters()
+
         try:
             for doctype_name in essential_doctypes:
                 if not frappe.db.exists("DocType", doctype_name):
@@ -819,7 +816,8 @@ class SmartRAGRetriever:
                             "source": "Database Schema",
                             "doctype": doctype.name,
                             "module": doctype.module,
-                            "type": "schema"
+                            "type": "schema",
+                            "do_not_split": True
                         }
 
                         if self.industry_handler:

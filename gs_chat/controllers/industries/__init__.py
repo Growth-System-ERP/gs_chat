@@ -26,10 +26,10 @@ def get_industry_handler(industry_type=None):
     if not industry_type:
         # Try to fetch from settings (adjust doctype name as per your settings)
         try:
-            settings = frappe.get_single("GS Chat Settings")
+            settings = frappe.get_single("Chatbot Settings")
             industry_type = settings.get("industry")
         except:
-            frappe.log_error("GS Chat Settings not found or industry field missing")
+            frappe.log_error("Chatbot Settings not found or industry field missing")
             return None
     
     if industry_type in INDUSTRY_CLASSES:
@@ -41,7 +41,7 @@ def get_industry_handler(industry_type=None):
 def get_active_industry():
     """Get the currently active industry from settings"""
     try:
-        settings = frappe.get_single("GS Chat Settings")
+        settings = frappe.get_single("Chatbot Settings")
         return settings.get("industry", "NBFC")  # Default to NBFC
     except:
         return "NBFC"
